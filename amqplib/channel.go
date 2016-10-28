@@ -7,25 +7,27 @@ import (
 	"github.com/streadway/amqp"
 )
 
+const (
+	ExType_Fanout = "fanout"
+	ExType_Direct = "direct"
+)
+
 type Channel struct {
 	channel *amqp.Channel
 
 	exchange     string
 	exchangeType string
 	key          string
-	tag          string
-	queueName    string
-	pushdata     chan string
+
+	pushdata chan string
 }
 
-func NewChannel(amqpuri, exchange, exchangeType, key, queuename, ctag string) (*Channel, error) {
+func NewChannel(amqpuri, exchange, exchangeType, key string) (*Channel, error) {
 	c := &Channel{
-		tag:          ctag,
 		exchange:     exchange,
 		exchangeType: exchangeType,
 		key:          key,
-		queueName:    queuename,
-		pushdata:     make(chan string, 0),
+		pushdata:     make(chan string),
 	}
 
 	log.Printf("dialing %q", amqpuri)
@@ -52,6 +54,6 @@ func (c *Channel) Close() error {
 	return c.channel.Close()
 }
 
-func (c *Channel) Cancel() error {
-	return c.channel.Cancel(c.queueName, false)
+func (c *Channel) Cancel(queueName string) error {
+	return c.channel.Cancel(queueName, false)
 }

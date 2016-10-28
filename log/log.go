@@ -235,7 +235,7 @@ func SetOutDir(path string, maxsize int, maxcount int) error {
 	return nil
 }
 
-var defaultCar = 3
+var defaultCar = 2
 
 // Debug 调试输出
 func Debug(a ...interface{}) {
