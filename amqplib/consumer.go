@@ -32,7 +32,7 @@ func (c *Channel) Consumer(queueName, consumerTag string) (<-chan amqp.Delivery,
 		c.Close()
 		return nil, fmt.Errorf("Queue Bind: %s", err)
 	}
-	log.Printf("Queue bound to Exchange, starting Consume (consumer tag %q)", c.tag)
+	log.Printf("Queue bound to Exchange, starting Consume (consumer tag %q)", consumerTag)
 	return c.channel.Consume(
 		queueName,   // name
 		consumerTag, // consumerTag,
