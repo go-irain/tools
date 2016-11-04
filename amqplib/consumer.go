@@ -7,6 +7,8 @@ import (
 	"github.com/streadway/amqp"
 )
 
+type Msg amqp.Delivery
+
 func (c *Channel) Consumer(queueName, consumerTag string) (<-chan amqp.Delivery, error) {
 	queue, err := c.channel.QueueDeclare(
 		queueName, // name

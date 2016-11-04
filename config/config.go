@@ -93,6 +93,14 @@ func (m ConfigSection) GetValueSlice(key string) []string {
 	return []string{}
 }
 
+func (m ConfigSection) GetAllKeyMapString() map[string]string {
+	newm := make(map[string]string)
+	for k, v := range m {
+		newm[k] = v[0]
+	}
+	return newm
+}
+
 func (m ConfigSection) GetValue(key string) string {
 	s := m.GetValueSlice(key)
 	if len(s) > 0 {

@@ -9,27 +9,33 @@ import (
 )
 
 type Storage struct {
-	address       string
 	db            map[string]*DB
 	maxopencounts int
 	output        func(string, ...interface{})
 }
 
-func New(address string, maxOpenConns int) *Storage {
-	s := &Storage{
-		address:       address,
-		maxopencounts: maxOpenConns,
-		db:            make(map[string]*DB),
+func New(dbs map[string]string, maxOpenConns int) *Storage {
+	if dbs == nil {
+		dbs = make(map[string]string)
 	}
-	return s
+	storage := &Storage{
+		db:            make(map[string]*DB),
+		maxopencounts: maxOpenConns,
+	}
+	for dbname, dsn := range dbs {
+		if erro := storage.AddDB(dbname, dsn); erro != nil {
+			panic(erro.Error())
+		}
+	}
+	return storage
 }
 
-func (s *Storage) AddDB(name string) error {
+func (s *Storage) AddDB(name string, dsn string) error {
 	if _, has := s.db[name]; has {
 		return fmt.Errorf("db:%s is already exist", name)
 	}
-	dns := fmt.Sprintf("%s/%s?charset=utf8", s.address, name)
-	db, erro := sql.Open("mysql", dns)
+	//dns := fmt.Sprintf("%s/%s?charset=utf8", s.address, name)
+	db, erro := sql.Open("mysql", dsn)
 	if erro != nil {
 		return erro
 	}

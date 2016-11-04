@@ -22,7 +22,7 @@ type Channel struct {
 	pushdata chan string
 }
 
-func NewChannel(amqpuri, exchange, exchangeType, key string) (*Channel, error) {
+func NewChannel(amqpuri, exchange, exchangeType, key string, onClose func(string)) (*Channel, error) {
 	c := &Channel{
 		exchange:     exchange,
 		exchangeType: exchangeType,
@@ -37,7 +37,7 @@ func NewChannel(amqpuri, exchange, exchangeType, key string) (*Channel, error) {
 	}
 
 	go func() {
-		fmt.Printf("closing: %s", <-conn.NotifyClose(make(chan *amqp.Error)))
+		onClose(fmt.Sprintf("%s", <-conn.NotifyClose(make(chan *amqp.Error))))
 	}()
 
 	log.Printf("got Connection, getting Channel")

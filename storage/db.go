@@ -3,7 +3,6 @@ package storage
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 )
@@ -26,11 +25,9 @@ func (d *DB) Query(query ...string) ([]Row, error) {
 	if len(query) > 1 {
 		logPrefix = query[1]
 	}
-	logstr := fmt.Sprintf("%s[storage] sql(%s)->%s", logPrefix, d.dbname, sqlstr)
 	if d.root.output != nil {
+		logstr := fmt.Sprintf("%s[storage] sql(%s)->%s", logPrefix, d.dbname, sqlstr)
 		d.root.output(logstr)
-	} else {
-		log.Println(logstr)
 	}
 	var result = make([]Row, 0)
 	rows, erro := d.db.Query(sqlstr)
@@ -72,11 +69,9 @@ func (d *DB) Exec(query ...string) (sql.Result, error) {
 	if len(query) > 1 {
 		logPrefix = query[1]
 	}
-	logstr := fmt.Sprintf("%s[storage] sql(%s)->%s", logPrefix, d.dbname, sqlstr)
 	if d.root.output != nil {
+		logstr := fmt.Sprintf("%s[storage] sql(%s)->%s", logPrefix, d.dbname, sqlstr)
 		d.root.output(logstr)
-	} else {
-		log.Println(logstr)
 	}
 	return d.db.Exec(strings.TrimSpace(sqlstr))
 }
@@ -139,7 +134,7 @@ func (s *Session) Select(args ...string) ([]Row, error) {
 		sql += " where " + s.where
 	}
 	if len(args) > 0 {
-		sql += strings.Join(args, " ")
+		sql += " " + strings.Join(args, " ")
 	}
 	return s.root.Query(sql, s.logid)
 }
