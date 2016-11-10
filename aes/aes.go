@@ -9,15 +9,15 @@ import (
 )
 
 func AesEncrypt(origData, key []byte) ([]byte, error) {
-	key = (sha256.Sum256(key))[:]
-	block, err := aes.NewCipher(key)
+	keySlice := sha256.Sum256(key)
+	block, err := aes.NewCipher(keySlice[:])
 	if err != nil {
 		return nil, err
 	}
 	blockSize := block.BlockSize()
 	origData, err = PKCS7Padding(origData, blockSize)
 	// origData = ZeroPadding(origData, block.BlockSize())
-	blockMode := cipher.NewCBCEncrypter(block, key[:blockSize])
+	blockMode := cipher.NewCBCEncrypter(block, keySlice[:blockSize])
 	crypted := make([]byte, len(origData))
 	// 根据CryptBlocks方法的说明，如下方式初始化crypted也可以
 	// crypted := origData
@@ -26,13 +26,13 @@ func AesEncrypt(origData, key []byte) ([]byte, error) {
 }
 
 func AesDecrypt(crypted, key []byte) ([]byte, error) {
-	key = (sha256.Sum256(key))[:]
-	block, err := aes.NewCipher(key)
+	keySlice := sha256.Sum256(key)
+	block, err := aes.NewCipher(keySlice[:])
 	if err != nil {
 		return nil, err
 	}
 	blockSize := block.BlockSize()
-	blockMode := cipher.NewCBCDecrypter(block, key[:blockSize])
+	blockMode := cipher.NewCBCDecrypter(block, keySlice[:blockSize])
 	origData := make([]byte, len(crypted))
 	// origData := crypted
 	blockMode.CryptBlocks(origData, crypted)
