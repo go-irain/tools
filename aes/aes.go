@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
 	"fmt"
 )
 
 func AesEncrypt(origData, key []byte) ([]byte, error) {
+	key = (sha256.Sum256(key))[:]
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -24,6 +26,7 @@ func AesEncrypt(origData, key []byte) ([]byte, error) {
 }
 
 func AesDecrypt(crypted, key []byte) ([]byte, error) {
+	key = (sha256.Sum256(key))[:]
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
