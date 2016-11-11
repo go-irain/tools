@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-type Row map[string]interface{}
+type Row map[string][]byte
 
 type Express string
 
@@ -22,25 +22,10 @@ func (r Row) IsNull(name string) bool {
 	return true
 }
 
-func (r Row) Bytes(name string) []byte {
-	if v, has := r[name]; has {
-		if val, ok := v.([]byte); ok {
-			return val
-		}
-	}
-	return nil
-}
 func (r Row) Str(name string) string {
 	if v, has := r[name]; has {
-		switch val := v.(type) {
-		case string:
-			return val
-		case []byte:
-			return string(val)
-		default:
-			if v != nil {
-				return fmt.Sprintf("%v", r)
-			}
+		if v != nil {
+			return string(v)
 		}
 	}
 	return ""
@@ -48,24 +33,8 @@ func (r Row) Str(name string) string {
 
 func (r Row) Int(name string) int64 {
 	if v, has := r[name]; has {
-		switch val := v.(type) {
-		case int:
-			return int64(val)
-		case int32:
-			return int64(val)
-		case int64:
-			return val
-		case uint:
-			return int64(val)
-		case uint32:
-			return int64(val)
-		case uint64:
-			return int64(val)
-		case string:
-			num, _ := strconv.ParseInt(val, 10, 64)
-			return num
-		case []byte:
-			num, _ := strconv.ParseInt(string(val), 10, 64)
+		if v != nil {
+			num, _ := strconv.ParseInt(string(v), 10, 64)
 			return num
 		}
 	}
@@ -74,28 +43,8 @@ func (r Row) Int(name string) int64 {
 
 func (r Row) Number(name string) float64 {
 	if v, has := r[name]; has {
-		switch val := v.(type) {
-		case int:
-			return float64(val)
-		case int32:
-			return float64(val)
-		case int64:
-			return float64(val)
-		case uint:
-			return float64(val)
-		case uint32:
-			return float64(val)
-		case uint64:
-			return float64(val)
-		case float32:
-			return float64(val)
-		case float64:
-			return val
-		case string:
-			num, _ := strconv.ParseFloat(val, 64)
-			return num
-		case []byte:
-			num, _ := strconv.ParseFloat(string(val), 64)
+		if v != nil {
+			num, _ := strconv.ParseFloat(string(v), 64)
 			return num
 		}
 	}

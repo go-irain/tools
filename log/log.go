@@ -125,7 +125,7 @@ func (log *Log) output(calldepth int, level LogLevel, str string) {
 		file = short
 		str = fmt.Sprintf("%s#%d %s", file, line, str)
 	}
-	str = fmt.Sprintf("%s [%s] %s", timenowfunc().Format("2006-01-02 15:04:05"), level, str)
+	str = fmt.Sprintf("%s [%s] %s", timenowfunc().Format("2006/01/02 15:04:05"), level, str)
 	if len(str) == 0 || str[len(str)-1] != '\n' {
 		str = string(append([]byte(str), '\n'))
 	}
