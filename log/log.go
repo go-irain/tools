@@ -3,12 +3,15 @@
 package log
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"time"
+	"unsafe"
 )
 
 type Log struct {
@@ -31,8 +34,6 @@ type Log struct {
 	// showFileline bool 使用globalLine
 
 	nowfilesize uint64
-	buf         []byte
-	msg         chan string
 	w           io.Writer
 }
 
@@ -60,14 +61,6 @@ func (l LogLevel) String() string {
 	}
 }
 
-// LStr level string name
-// var LStr = []string{
-// 	" [DBUG] ",
-// 	" [INFO] ",
-// 	" [WARN] ",
-// 	" [ERRO] ",
-// }
-
 const (
 	_         = iota
 	KB uint64 = 1 << (10 * iota)
@@ -76,24 +69,25 @@ const (
 
 var golbalLogger *Log
 
+// 默认显示等级
 var golbalLevel LogLevel
+
+// 默认显示行数
 var golbalLine = true
 
-func itoa(buf *[]byte, i int, wid int) {
-	var b [20]byte
-	bp := len(b) - 1
-	for i >= 10 || wid > 1 {
-		wid--
-		q := i / 10
-		b[bp] = byte('0' + i - q*10)
-		bp--
-		i = q
-	}
-	b[bp] = byte('0' + i)
-	*buf = append(*buf, b[bp:]...)
-}
+// filter 等级过滤器 可以自定义一些处理
+var golbalFilter = map[LogLevel]func(string){}
 
 var timenowfunc = time.Now
+
+func stringToSlice(s string) (b []byte) {
+	pbytes := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	pstring := (*reflect.StringHeader)(unsafe.Pointer(&s))
+	pbytes.Data = pstring.Data
+	pbytes.Len = pstring.Len
+	pbytes.Cap = pstring.Len
+	return
+}
 
 func (log *Log) write(str string) error {
 	if log.w == nil || log.nowfilesize > log.maxsize {
@@ -102,30 +96,7 @@ func (log *Log) write(str string) error {
 			return erro
 		}
 	}
-
-	t := timenowfunc()
-	log.buf = log.buf[:0]
-
-	year, month, day := t.Date()
-	itoa(&log.buf, year, 4)
-	log.buf = append(log.buf, '-')
-	itoa(&log.buf, int(month), 2)
-	log.buf = append(log.buf, '-')
-	itoa(&log.buf, day, 2)
-	log.buf = append(log.buf, ' ')
-
-	hour, min, sec := t.Clock()
-	itoa(&log.buf, hour, 2)
-	log.buf = append(log.buf, ':')
-	itoa(&log.buf, min, 2)
-	log.buf = append(log.buf, ':')
-	itoa(&log.buf, sec, 2)
-
-	log.buf = append(log.buf, str...)
-	if len(str) == 0 || str[len(str)-1] != '\n' {
-		log.buf = append(log.buf, '\n')
-	}
-	size, erro := log.w.Write(log.buf)
+	size, erro := log.w.Write(stringToSlice(str))
 	log.nowfilesize += uint64(size)
 	return erro
 }
@@ -154,18 +125,21 @@ func (log *Log) output(calldepth int, level LogLevel, str string) {
 		file = short
 		str = fmt.Sprintf("%s#%d %s", file, line, str)
 	}
-	str = fmt.Sprintf(" [%s] %s", level, str)
-	//str = LStr[int(level)] + str
+	str = fmt.Sprintf("%s [%s] %s", timenowfunc().Format("2006-01-02 15:04:05"), level, str)
+	if len(str) == 0 || str[len(str)-1] != '\n' {
+		str = string(append([]byte(str), '\n'))
+	}
+	if filter, ok := golbalFilter[level]; ok {
+		filter(str)
+	}
 	// 未设置输出目录则直接stdout
 	if log == nil {
-		if len(str) == 0 || str[len(str)-1] != '\n' {
-			str = string(append([]byte(str), '\n'))
-		}
-		print(time.Now().Format("2006-01-02 15:04:05") + str)
-		return
+		print(str)
+	} else {
+		// push到队列中
+		log.write(str)
 	}
-	// push到队列中
-	log.msg <- str
+
 }
 
 func SetFlag(level LogLevel, showline bool) {
@@ -176,23 +150,12 @@ func SetFlag(level LogLevel, showline bool) {
 	golbalLine = showline
 }
 
-// Flush
-// 设置SetOutDir后务必调用Flush 保证数据全部写入文件
-// log.SetOutDir(....)
-// defer log.Flush()
-func Flush() {
-	if golbalLogger != nil {
-		time.Sleep(time.Millisecond * 1)
-		// 关闭chan 停止写入
-		close(golbalLogger.msg)
-		for {
-			// 检查缓存的消息是否全部写入完毕
-			// 写入完毕则退出
-			if len(golbalLogger.msg) == 0 {
-				return
-			}
-		}
+func SetFilter(levl LogLevel, hander func(msg string)) error {
+	if _, ok := golbalFilter[levl]; ok {
+		return errors.New("filter error:level is alreay set")
 	}
+	golbalFilter[levl] = hander
+	return nil
 }
 
 // SetOutDir 只有设置了目录等属性 才会真正的写入文件
@@ -222,15 +185,7 @@ func SetOutDir(path string, maxsize int, maxcount int) error {
 		maxcoutnum: maxcount,
 		maxsize:    uint64(maxsize) * MB,
 		path:       filepath.Clean(path) + string(filepath.Separator),
-		msg:        make(chan string, 512),
 	}
-	go func() {
-		for v := range log.msg {
-			if err := log.write(v); err != nil {
-				println(err.Error())
-			}
-		}
-	}()
 	golbalLogger = log
 	return nil
 }

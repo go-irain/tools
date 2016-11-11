@@ -56,6 +56,10 @@ func (log *Log) splitFile() error {
 					return log.setOutputHandler(oldsize)
 				}
 			}
+		} else {
+			if fd, ok := log.w.(*os.File); ok {
+				fd.Close()
+			}
 		}
 
 		var lastindex int

@@ -9,6 +9,8 @@ import (
 
 type Row map[string]interface{}
 
+type Express string
+
 func (r Row) Delete(key string) {
 	delete(r, key)
 }
@@ -52,7 +54,7 @@ func (r Row) Int(name string) int64 {
 		case int32:
 			return int64(val)
 		case int64:
-			return int64(val)
+			return val
 		case uint:
 			return int64(val)
 		case uint32:
@@ -64,6 +66,36 @@ func (r Row) Int(name string) int64 {
 			return num
 		case []byte:
 			num, _ := strconv.ParseInt(string(val), 10, 64)
+			return num
+		}
+	}
+	return 0
+}
+
+func (r Row) Number(name string) float64 {
+	if v, has := r[name]; has {
+		switch val := v.(type) {
+		case int:
+			return float64(val)
+		case int32:
+			return float64(val)
+		case int64:
+			return float64(val)
+		case uint:
+			return float64(val)
+		case uint32:
+			return float64(val)
+		case uint64:
+			return float64(val)
+		case float32:
+			return float64(val)
+		case float64:
+			return val
+		case string:
+			num, _ := strconv.ParseFloat(val, 64)
+			return num
+		case []byte:
+			num, _ := strconv.ParseFloat(string(val), 64)
 			return num
 		}
 	}
@@ -142,6 +174,8 @@ func parseArg(result []byte, arg interface{}) []byte {
 		} else {
 			result = strconv.AppendInt(result, 0, 10)
 		}
+	case Express:
+		result = append(result, []byte(fmt.Sprintf("%v", a))...)
 	default:
 		result = append(result, '\'')
 		result = escapeStringBackslash(result, fmt.Sprintf("%v", a))

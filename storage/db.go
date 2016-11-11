@@ -21,12 +21,11 @@ func (d *DB) Query(query ...string) ([]Row, error) {
 		return nil, fmt.Errorf("query func args is empty")
 	}
 	sqlstr := query[0]
-	var logPrefix string
 	if len(query) > 1 {
-		logPrefix = query[1]
+		sqlstr = "/*" + query[1] + "*/ " + sqlstr
 	}
 	if d.root.output != nil {
-		logstr := fmt.Sprintf("%s[storage] sql(%s)->%s", logPrefix, d.dbname, sqlstr)
+		logstr := fmt.Sprintf("[storage] sql(%s)->%s", d.dbname, sqlstr)
 		d.root.output(logstr)
 	}
 	var result = make([]Row, 0)
@@ -65,12 +64,11 @@ func (d *DB) Exec(query ...string) (sql.Result, error) {
 		return nil, fmt.Errorf("Exec func args is empty")
 	}
 	sqlstr := query[0]
-	var logPrefix string
 	if len(query) > 1 {
-		logPrefix = query[1]
+		sqlstr = "/*" + query[1] + "*/ " + sqlstr
 	}
 	if d.root.output != nil {
-		logstr := fmt.Sprintf("%s[storage] sql(%s)->%s", logPrefix, d.dbname, sqlstr)
+		logstr := fmt.Sprintf("[storage] sql(%s)->%s", d.dbname, sqlstr)
 		d.root.output(logstr)
 	}
 	return d.db.Exec(strings.TrimSpace(sqlstr))
@@ -78,11 +76,11 @@ func (d *DB) Exec(query ...string) (sql.Result, error) {
 
 // Session 单次查询执行的会话
 type Session struct {
-	root   *DB
-	logid  string
-	table  string
-	fields string
-	where  string
+	root     *DB
+	comments string
+	table    string
+	fields   string
+	where    string
 }
 
 func (d *DB) Table(name string) *Session {
@@ -97,7 +95,7 @@ func (s *Session) reset() {
 	s.table = ""
 	s.fields = ""
 	s.where = ""
-	s.logid = ""
+	s.comments = ""
 }
 
 // Close 用于吧session放回池子中
@@ -107,9 +105,10 @@ func (s *Session) Close() {
 	}
 }
 
-// SetLogPrix 设置日志前缀
-func (s *Session) SetLogPrix(prefix string) {
-	s.logid = prefix
+// SetComments 设置注释
+func (s *Session) SetComments(notes string) *Session {
+	s.comments = notes
+	return s
 }
 
 // Fields Select 查询参数
@@ -136,7 +135,7 @@ func (s *Session) Select(args ...string) ([]Row, error) {
 	if len(args) > 0 {
 		sql += " " + strings.Join(args, " ")
 	}
-	return s.root.Query(sql, s.logid)
+	return s.root.Query(sql, s.comments)
 }
 
 // Insert 返回插入的主键 当主键是自增长的整数时有效
@@ -150,7 +149,7 @@ func (s *Session) Insert(args map[string]interface{}) (int64, error) {
 		"insert into %s %s",
 		s.table, colnumsvalue,
 	)
-	if ret, erro := s.root.Exec(sql, s.logid); erro != nil {
+	if ret, erro := s.root.Exec(sql, s.comments); erro != nil {
 		return 0, erro
 	} else {
 		lastid, _ := ret.LastInsertId()
@@ -168,7 +167,7 @@ func (s *Session) Update(args map[string]interface{}) (int64, error) {
 		"update %s set %s where %s",
 		s.table, updatevalue, s.where,
 	)
-	if ret, erro := s.root.Exec(sql, s.logid); erro != nil {
+	if ret, erro := s.root.Exec(sql, s.comments); erro != nil {
 		return 0, erro
 	} else {
 		count, _ := ret.RowsAffected()
@@ -187,7 +186,7 @@ func (s *Session) InsertDup(val, update map[string]interface{}) (int64, int64, e
 		"insert into %s %s on duplicate key update %s",
 		s.table, colnumsvalue, updatevalue,
 	)
-	if ret, erro := s.root.Exec(sql, s.logid); erro != nil {
+	if ret, erro := s.root.Exec(sql, s.comments); erro != nil {
 		return 0, 0, erro
 	} else {
 		inserid, _ := ret.LastInsertId()
@@ -203,6 +202,6 @@ func (s *Session) Delete() error {
 		return fmt.Errorf("delete sql is not found where")
 	}
 	sql := fmt.Sprintf("delete from %s where %s", s.table, s.where)
-	_, erro := s.root.Exec(sql, s.logid)
+	_, erro := s.root.Exec(sql, s.comments)
 	return erro
 }
