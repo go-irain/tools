@@ -1,7 +1,5 @@
 package log
 
-import "fmt"
-
 // 日志大小单位
 const (
 	_         = iota
@@ -45,6 +43,14 @@ func init() {
 
 // 以下方法位全局映射
 
+func AddSub(name string) error {
+	return golbalLogger.AddSub(name)
+}
+
+func Sub(name string) *Output {
+	return golbalLogger.Sub(name)
+}
+
 // SetFlag 设置是否显示行号，以及日志等级
 func SetFlag(level Level, showline bool) {
 	golbalLogger.SetFlag(level, showline)
@@ -56,46 +62,47 @@ func SetFilter(levl Level, hander func(msg string)) error {
 }
 
 // SetOutDir 设置输出目录 默认输出到控制台
+// maxsize 单个文件最大 单位MB maxcount 文件夹最多保存多少个文件
 func SetOutDir(path string, maxsize int, maxcount int) {
 	golbalLogger.SetOutDir(path, maxsize, maxcount)
 }
 
 // Debug 调试输出
 func Debug(a ...interface{}) {
-	golbalLogger.output(defaultCar, L_DEBUG, fmt.Sprintln(a...))
+	golbalLogger.Debug(a...)
 }
 
 // Info 普通信息
 func Info(a ...interface{}) {
-	golbalLogger.output(defaultCar, L_INFO, fmt.Sprintln(a...))
+	golbalLogger.Info(a...)
 }
 
 // Warnning 警告
 func Warnning(a ...interface{}) {
-	golbalLogger.output(defaultCar, L_WARN, fmt.Sprintln(a...))
+	golbalLogger.Warnning(a...)
 }
 
 // Error 错误
 func Error(a ...interface{}) {
-	golbalLogger.output(defaultCar, L_ERROR, fmt.Sprintln(a...))
+	golbalLogger.Error(a...)
 }
 
 // Debugf 格式化debug输出
 func Debugf(format string, a ...interface{}) {
-	golbalLogger.output(defaultCar, L_DEBUG, fmt.Sprintf(format, a...))
+	golbalLogger.Debugf(format, a...)
 }
 
 // Infof 格式化info输出
 func Infof(format string, a ...interface{}) {
-	golbalLogger.output(defaultCar, L_INFO, fmt.Sprintf(format, a...))
+	golbalLogger.Infof(format, a...)
 }
 
 // Warnningf 格式化warnning输出
 func Warnningf(format string, a ...interface{}) {
-	golbalLogger.output(defaultCar, L_WARN, fmt.Sprintf(format, a...))
+	golbalLogger.Warnningf(format, a...)
 }
 
 // Errorf 格式化error输出
 func Errorf(format string, a ...interface{}) {
-	golbalLogger.output(defaultCar, L_ERROR, fmt.Sprintf(format, a...))
+	golbalLogger.Errorf(format, a...)
 }

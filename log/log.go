@@ -5,11 +5,11 @@ package log
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -37,23 +37,28 @@ type Log struct {
 	// 日志等级
 	level Level
 
+	// 负责写文件
+	// 一个日志可能会写不同的文件名
+	outputs           map[string]*Output
+	defaultOutputname string
+
 	// filter 等级过滤器 可以自定义一些处理
 	filters map[Level]func(string)
-
-	// 当前文件写入的未知
-	nowfilesize uint64
-	w           io.Writer
 
 	lock sync.Mutex
 }
 
 // NewLog 初始化一个新的log
 func NewLog() *Log {
-	return &Log{
-		filters:      make(map[Level]func(string)),
-		showFileline: true,
-		level:        L_DEBUG,
+	l := &Log{
+		filters:           make(map[Level]func(string)),
+		showFileline:      true,
+		level:             L_DEBUG,
+		outputs:           make(map[string]*Output),
+		defaultOutputname: (strings.Split(os.Args[0], "."))[0],
 	}
+	l.AddSub(l.defaultOutputname)
+	return l
 }
 
 var logpaths = []string{}
@@ -69,51 +74,22 @@ func stringToSlice(s string) (b []byte) {
 	return
 }
 
-func (log *Log) output(calldepth int, level Level, str string) error {
-	if level > L_ERROR || level < log.level {
-		return nil
-	}
-	if log.showFileline {
-		_, file, line, ok := runtime.Caller(calldepth)
-		if !ok {
-			file = "???"
-			line = 0
-		}
-		short := file
-		length := len(file) - 1
-		for i := length; i > 0; i-- {
-			if file[i] == '/' {
-				short = file[i+1 : length-2]
-				break
-			}
-		}
-		file = short
-		str = fmt.Sprintf("%s:L%d %s", file, line, str)
-	}
-	str = fmt.Sprintf("%s [%s] %s", timenowfunc().Format("2006/01/02 15:04:05"), level, str)
-	if len(str) == 0 || str[len(str)-1] != '\n' {
-		str = string(append([]byte(str), '\n'))
-	}
-	if filter, ok := log.filters[level]; ok {
-		filter(str)
-	}
-	msgbytes := stringToSlice(str)
-	if log.path == "" {
-		_, erro := os.Stderr.Write(msgbytes)
-		return erro
+func (log *Log) AddSub(name string) error {
+	name = strings.TrimSpace(name)
+	if len(name) == 0 {
+		return errors.New("AddSub params subname is empty")
 	}
 	log.lock.Lock()
-	if log.w == nil || log.nowfilesize > log.maxsize {
-		if erro := log.splitFile(); erro != nil {
-			log.lock.Unlock()
-			return erro
-		}
+	defer log.lock.Unlock()
+	if _, ok := log.outputs[name]; ok {
+		return errors.New("AddSub params subname is exist:" + name)
 	}
-	size, erro := log.w.Write(msgbytes)
-	log.nowfilesize += uint64(size)
-	log.lock.Unlock()
-	return erro
-
+	path := log.path + name + "_"
+	log.outputs[name] = &Output{
+		loger: log,
+		wio:   NewWriteIO(path, log.maxsize, log.maxcoutnum),
+	}
+	return nil
 }
 
 // SetFlag 设置是否显示行号，以及日志等级
@@ -172,44 +148,146 @@ func (log *Log) SetOutDir(path string, maxsize int, maxcount int) {
 	log.maxsize = uint64(maxsize) * MB
 	log.maxcoutnum = maxcount
 
+	for k, v := range log.outputs {
+		v.updateConfig(k)
+	}
+}
+
+func (log *Log) Sub(name string) *Output {
+	if v, ok := log.outputs[name]; ok {
+		return v
+	}
+	return log.outputs[log.defaultOutputname]
 }
 
 // Debug 调试输出
 func (log *Log) Debug(a ...interface{}) {
-	log.output(defaultCar, L_DEBUG, fmt.Sprintln(a...))
+	log.Sub(log.defaultOutputname).Debug(a...)
 }
 
 // Info 普通信息
 func (log *Log) Info(a ...interface{}) {
-	log.output(defaultCar, L_INFO, fmt.Sprintln(a...))
+	log.Sub(log.defaultOutputname).Info(a...)
 }
 
 // Warnning 警告
 func (log *Log) Warnning(a ...interface{}) {
-	log.output(defaultCar, L_WARN, fmt.Sprintln(a...))
+	log.Sub(log.defaultOutputname).Warnning(a...)
 }
 
 // Error 错误
 func (log *Log) Error(a ...interface{}) {
-	log.output(defaultCar, L_ERROR, fmt.Sprintln(a...))
+	log.Sub(log.defaultOutputname).Error(a...)
 }
 
 // Debugf 格式化debug输出
 func (log *Log) Debugf(format string, a ...interface{}) {
-	log.output(defaultCar, L_DEBUG, fmt.Sprintf(format, a...))
+	log.Sub(log.defaultOutputname).Debugf(format, a...)
 }
 
 // Infof 格式化info输出
 func (log *Log) Infof(format string, a ...interface{}) {
-	log.output(defaultCar, L_INFO, fmt.Sprintf(format, a...))
+	log.Sub(log.defaultOutputname).Infof(format, a...)
 }
 
 // Warnningf 格式化warnning输出
 func (log *Log) Warnningf(format string, a ...interface{}) {
-	log.output(defaultCar, L_WARN, fmt.Sprintf(format, a...))
+	log.Sub(log.defaultOutputname).Warnningf(format, a...)
 }
 
 // Errorf 格式化error输出
 func (log *Log) Errorf(format string, a ...interface{}) {
-	log.output(defaultCar, L_ERROR, fmt.Sprintf(format, a...))
+	log.Sub(log.defaultOutputname).Errorf(format, a...)
+}
+
+type Output struct {
+	loger *Log
+	wio   *WriteIO
+}
+
+func (o *Output) updateConfig(name string) {
+	o.wio.path = o.loger.path + name + "_"
+	o.wio.maxcoutnum = o.loger.maxcoutnum
+	o.wio.maxsize = o.loger.maxsize
+}
+
+func (o *Output) print(level Level, str string) error {
+	if level > L_ERROR || level < o.loger.level {
+		return nil
+	}
+
+	buf := make([]byte, 0, len(str)+20)
+	buf = append(buf, timenowfunc().Format("2006/01/02 15:04:05")...)
+	buf = append(buf, fmt.Sprintf(" [%s] ", level)...)
+
+	if o.loger.showFileline {
+		_, file, line, ok := runtime.Caller(defaultCar)
+		if !ok {
+			file = "???"
+			line = 0
+		}
+
+		length := len(file) - 1
+		for i := length; i > 0; i-- {
+			if file[i] == '/' {
+				file = file[i+1 : length-2]
+				break
+			}
+		}
+		buf = append(buf, fmt.Sprintf("%s:L%d ", file, line)...)
+	}
+	msgbytes := stringToSlice(str)
+	if len(msgbytes) == 0 || msgbytes[len(msgbytes)-1] != '\n' {
+		msgbytes = append(msgbytes, '\n')
+	}
+	buf = append(buf, msgbytes...)
+	if filter, ok := o.loger.filters[level]; ok {
+		filter(string(buf))
+	}
+
+	if o.loger.path == "" {
+		_, erro := os.Stderr.Write(buf)
+		return erro
+	}
+	return o.wio.write(buf)
+}
+
+// Debug 调试输出
+func (o *Output) Debug(a ...interface{}) {
+	o.print(L_DEBUG, fmt.Sprintln(a...))
+}
+
+// Info 普通信息
+func (o *Output) Info(a ...interface{}) {
+	o.print(L_INFO, fmt.Sprintln(a...))
+}
+
+// Warnning 警告
+func (o *Output) Warnning(a ...interface{}) {
+	o.print(L_WARN, fmt.Sprintln(a...))
+}
+
+// Error 错误
+func (o *Output) Error(a ...interface{}) {
+	o.print(L_ERROR, fmt.Sprintln(a...))
+}
+
+// Debugf 格式化debug输出
+func (o *Output) Debugf(format string, a ...interface{}) {
+	o.print(L_DEBUG, fmt.Sprintf(format, a...))
+}
+
+// Infof 格式化info输出
+func (o *Output) Infof(format string, a ...interface{}) {
+	o.print(L_INFO, fmt.Sprintf(format, a...))
+}
+
+// Warnningf 格式化warnning输出
+func (o *Output) Warnningf(format string, a ...interface{}) {
+	o.print(L_WARN, fmt.Sprintf(format, a...))
+}
+
+// Errorf 格式化error输出
+func (o *Output) Errorf(format string, a ...interface{}) {
+	o.print(L_ERROR, fmt.Sprintf(format, a...))
 }
