@@ -3,16 +3,16 @@
 package log
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
 )
 
 type Log struct {
@@ -25,7 +25,7 @@ type Log struct {
 	path string
 
 	// maxsize单个日志文件最大byte 单位MB
-	maxsize uint64
+	maxsize int64
 	// maxcoutnum 最大日志文件数量 0不记录
 	maxcoutnum int
 
@@ -39,11 +39,13 @@ type Log struct {
 
 	// 负责写文件
 	// 一个日志可能会写不同的文件名
-	outputs           map[string]*Output
-	defaultOutputname string
+	tags           map[string]io.Writer
+	defaultTagName string
+
+	bufpool *sync.Pool
 
 	// filter 等级过滤器 可以自定义一些处理
-	filters map[Level]func(string)
+	filters map[Level]func(string, string)
 
 	lock sync.Mutex
 }
@@ -51,60 +53,62 @@ type Log struct {
 // NewLog 初始化一个新的log
 func NewLog() *Log {
 	l := &Log{
-		filters:           make(map[Level]func(string)),
-		showFileline:      true,
-		level:             L_DEBUG,
-		outputs:           make(map[string]*Output),
-		defaultOutputname: (strings.Split(os.Args[0], "."))[0],
+		filters:        make(map[Level]func(string, string)),
+		showFileline:   true,
+		level:          L_DEBUG,
+		tags:           make(map[string]io.Writer),
+		defaultTagName: (strings.Split(filepath.Base(os.Args[0]), "."))[0],
+		bufpool: &sync.Pool{New: func() interface{} {
+			return bytes.NewBuffer([]byte{})
+		}},
 	}
-	l.AddSub(l.defaultOutputname)
+	l.SetTags(l.defaultTagName)
 	return l
 }
 
 var logpaths = []string{}
-
 var timenowfunc = time.Now
 
-func stringToSlice(s string) (b []byte) {
-	pbytes := (*reflect.SliceHeader)(unsafe.Pointer(&b))
-	pstring := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	pbytes.Data = pstring.Data
-	pbytes.Len = pstring.Len
-	pbytes.Cap = pstring.Len
-	return
-}
-
-func (log *Log) AddSub(name string) error {
-	name = strings.TrimSpace(name)
-	if len(name) == 0 {
-		return errors.New("AddSub params subname is empty")
-	}
+// SetTags 设置标签 作用是将日志输出到指定前缀的文件中
+func (log *Log) SetTags(tagnames ...string) error {
 	log.lock.Lock()
 	defer log.lock.Unlock()
-	if _, ok := log.outputs[name]; ok {
-		return errors.New("AddSub params subname is exist:" + name)
-	}
-	path := log.path + name + "_"
-	log.outputs[name] = &Output{
-		loger: log,
-		wio:   NewWriteIO(path, log.maxsize, log.maxcoutnum),
+	for _, name := range tagnames {
+		name = strings.TrimSpace(name)
+		if len(name) == 0 {
+			return errors.New("SetTags params is empty")
+		}
+		if _, ok := log.tags[name]; ok {
+			return errors.New("SetTags params subname is exist:" + name)
+		}
+		if log.path == "" {
+			log.tags[name] = os.Stdout
+		} else {
+			log.tags[name] = NewWriteIO(log.path, name+"_", log.maxsize, log.maxcoutnum)
+		}
 	}
 	return nil
 }
 
-// SetFlag 设置是否显示行号，以及日志等级
-func (log *Log) SetFlag(level Level, showline bool) {
+// SetLevel 设置日志等级
+func (log *Log) SetLevel(level Level) {
+	log.lock.Lock()
+	defer log.lock.Unlock()
 	if level > L_ERROR {
 		level = L_ERROR
 	}
-	log.lock.Lock()
 	log.level = level
-	log.showFileline = showline
-	log.lock.Unlock()
 }
 
-// SetFilter 过滤气 可以对指定的等级log进行自定义处理
-func (log *Log) SetFilter(levl Level, hander func(msg string)) error {
+// SetShowLineNumber 是否显示行号
+func (log *Log) SetShowLineNumber(show bool) {
+	log.lock.Lock()
+	defer log.lock.Unlock()
+	log.showFileline = show
+}
+
+// SetHook 钩子 可以对指定的等级log进行自定义处理
+func (log *Log) SetHook(levl Level, hander func(tag, msg string)) error {
 	log.lock.Lock()
 	defer log.lock.Unlock()
 	if _, ok := log.filters[levl]; ok {
@@ -114,8 +118,9 @@ func (log *Log) SetFilter(levl Level, hander func(msg string)) error {
 	return nil
 }
 
-// SetOutDir 设置输出目录 默认输出到控制台
-func (log *Log) SetOutDir(path string, maxsize int, maxcount int) {
+// SetOutDirConfig 设置输出目录 默认输出到控制台
+// maxsize 单个日志文件的最大大小 单位MB maxcount 目录下最大日志文件数量 每个独立的tag日志 独立计算
+func (log *Log) SetOutDirConfig(path string, maxsize int, maxcount int) {
 	if maxsize <= 0 || maxcount <= 0 {
 		return
 	}
@@ -145,88 +150,27 @@ func (log *Log) SetOutDir(path string, maxsize int, maxcount int) {
 		os.Exit(1)
 	}
 	log.path = filepath.Clean(path) + string(filepath.Separator)
-	log.maxsize = uint64(maxsize) * MB
+	log.maxsize = int64(maxsize) * MB
 	log.maxcoutnum = maxcount
-
-	for k, v := range log.outputs {
-		v.updateConfig(k)
+	for name := range log.tags {
+		log.tags[name] = NewWriteIO(log.path, name+"_", log.maxsize, log.maxcoutnum)
 	}
 }
 
-func (log *Log) Sub(name string) *Output {
-	if v, ok := log.outputs[name]; ok {
-		return v
+func (log *Log) Output(tag string, level Level, calldepth int, str string) {
+	if level > L_ERROR || level < log.level {
+		return
 	}
-	return log.outputs[log.defaultOutputname]
-}
-
-// Debug 调试输出
-func (log *Log) Debug(a ...interface{}) {
-	log.Sub(log.defaultOutputname).Debug(a...)
-}
-
-// Info 普通信息
-func (log *Log) Info(a ...interface{}) {
-	log.Sub(log.defaultOutputname).Info(a...)
-}
-
-// Warnning 警告
-func (log *Log) Warnning(a ...interface{}) {
-	log.Sub(log.defaultOutputname).Warnning(a...)
-}
-
-// Error 错误
-func (log *Log) Error(a ...interface{}) {
-	log.Sub(log.defaultOutputname).Error(a...)
-}
-
-// Debugf 格式化debug输出
-func (log *Log) Debugf(format string, a ...interface{}) {
-	log.Sub(log.defaultOutputname).Debugf(format, a...)
-}
-
-// Infof 格式化info输出
-func (log *Log) Infof(format string, a ...interface{}) {
-	log.Sub(log.defaultOutputname).Infof(format, a...)
-}
-
-// Warnningf 格式化warnning输出
-func (log *Log) Warnningf(format string, a ...interface{}) {
-	log.Sub(log.defaultOutputname).Warnningf(format, a...)
-}
-
-// Errorf 格式化error输出
-func (log *Log) Errorf(format string, a ...interface{}) {
-	log.Sub(log.defaultOutputname).Errorf(format, a...)
-}
-
-type Output struct {
-	loger *Log
-	wio   *WriteIO
-}
-
-func (o *Output) updateConfig(name string) {
-	o.wio.path = o.loger.path + name + "_"
-	o.wio.maxcoutnum = o.loger.maxcoutnum
-	o.wio.maxsize = o.loger.maxsize
-}
-
-func (o *Output) print(level Level, str string) error {
-	if level > L_ERROR || level < o.loger.level {
-		return nil
-	}
-
-	buf := make([]byte, 0, len(str)+20)
-	buf = append(buf, timenowfunc().Format("2006/01/02 15:04:05")...)
-	buf = append(buf, fmt.Sprintf(" [%s] ", level)...)
-
-	if o.loger.showFileline {
-		_, file, line, ok := runtime.Caller(defaultCar)
+	buf := log.bufpool.Get().(*bytes.Buffer)
+	buf.Reset()
+	buf.WriteString(timenowfunc().Format("2006/01/02 15:04:05"))
+	buf.WriteString(fmt.Sprintf(" [%s] <%s> ", level, tag))
+	if log.showFileline {
+		_, file, line, ok := runtime.Caller(calldepth)
 		if !ok {
 			file = "???"
 			line = 0
 		}
-
 		length := len(file) - 1
 		for i := length; i > 0; i-- {
 			if file[i] == '/' {
@@ -234,60 +178,103 @@ func (o *Output) print(level Level, str string) error {
 				break
 			}
 		}
-		buf = append(buf, fmt.Sprintf("%s:L%d ", file, line)...)
+		buf.WriteString(fmt.Sprintf("%s:%d ", file, line))
 	}
-	msgbytes := stringToSlice(str)
-	if len(msgbytes) == 0 || msgbytes[len(msgbytes)-1] != '\n' {
-		msgbytes = append(msgbytes, '\n')
+	if len(str) == 0 || str[len(str)-1] != '\n' {
+		str += "\n"
 	}
-	buf = append(buf, msgbytes...)
-	if filter, ok := o.loger.filters[level]; ok {
-		filter(string(buf))
+	buf.WriteString(str)
+	log.lock.Lock()
+	if filter, ok := log.filters[level]; ok {
+		filter(tag, str)
 	}
+	out, ok := log.tags[tag]
+	if !ok {
+		out = log.tags[log.defaultTagName]
+	}
+	log.lock.Unlock()
+	if _, erro := buf.WriteTo(out); erro != nil {
+		println(erro.Error())
+	}
+	log.bufpool.Put(buf)
+}
 
-	if o.loger.path == "" {
-		_, erro := os.Stderr.Write(buf)
-		return erro
-	}
-	return o.wio.write(buf)
+// TagDebug 调试输出
+func (log *Log) TagDebug(tag string, a ...interface{}) {
+	log.Output(tag, L_DEBUG, 3, fmt.Sprintln(a...))
+}
+
+// TagInfo 普通信息
+func (log *Log) TagInfo(tag string, a ...interface{}) {
+	log.Output(tag, L_INFO, 3, fmt.Sprintln(a...))
+}
+
+// TagWarnning 警告
+func (log *Log) TagWarnning(tag string, a ...interface{}) {
+	log.Output(tag, L_WARN, 3, fmt.Sprintln(a...))
+}
+
+// TagError 错误
+func (log *Log) TagError(tag string, a ...interface{}) {
+	log.Output(tag, L_ERROR, 3, fmt.Sprintln(a...))
+}
+
+// TagDebugf 格式化debug输出
+func (log *Log) TagDebugf(tag, format string, a ...interface{}) {
+	log.Output(tag, L_DEBUG, 3, fmt.Sprintf(format, a...))
+}
+
+// TagInfof 格式化info输出
+func (log *Log) TagInfof(tag, format string, a ...interface{}) {
+	log.Output(tag, L_INFO, 3, fmt.Sprintf(format, a...))
+}
+
+// TagWarnningf 格式化warnning输出
+func (log *Log) TagWarnningf(tag, format string, a ...interface{}) {
+	log.Output(tag, L_WARN, 3, fmt.Sprintf(format, a...))
+}
+
+// TagErrorf 格式化error输出
+func (log *Log) TagErrorf(tag, format string, a ...interface{}) {
+	log.Output(tag, L_ERROR, 3, fmt.Sprintf(format, a...))
 }
 
 // Debug 调试输出
-func (o *Output) Debug(a ...interface{}) {
-	o.print(L_DEBUG, fmt.Sprintln(a...))
+func (log *Log) Debug(a ...interface{}) {
+	log.TagDebug(log.defaultTagName, a...)
 }
 
 // Info 普通信息
-func (o *Output) Info(a ...interface{}) {
-	o.print(L_INFO, fmt.Sprintln(a...))
+func (log *Log) Info(a ...interface{}) {
+	log.TagInfo(log.defaultTagName, a...)
 }
 
 // Warnning 警告
-func (o *Output) Warnning(a ...interface{}) {
-	o.print(L_WARN, fmt.Sprintln(a...))
+func (log *Log) Warnning(a ...interface{}) {
+	log.TagWarnning(log.defaultTagName, a...)
 }
 
 // Error 错误
-func (o *Output) Error(a ...interface{}) {
-	o.print(L_ERROR, fmt.Sprintln(a...))
+func (log *Log) Error(a ...interface{}) {
+	log.TagError(log.defaultTagName, a...)
 }
 
 // Debugf 格式化debug输出
-func (o *Output) Debugf(format string, a ...interface{}) {
-	o.print(L_DEBUG, fmt.Sprintf(format, a...))
+func (log *Log) Debugf(format string, a ...interface{}) {
+	log.TagDebugf(log.defaultTagName, format, a...)
 }
 
 // Infof 格式化info输出
-func (o *Output) Infof(format string, a ...interface{}) {
-	o.print(L_INFO, fmt.Sprintf(format, a...))
+func (log *Log) Infof(format string, a ...interface{}) {
+	log.TagInfof(log.defaultTagName, format, a...)
 }
 
 // Warnningf 格式化warnning输出
-func (o *Output) Warnningf(format string, a ...interface{}) {
-	o.print(L_WARN, fmt.Sprintf(format, a...))
+func (log *Log) Warnningf(format string, a ...interface{}) {
+	log.TagWarnningf(log.defaultTagName, format, a...)
 }
 
 // Errorf 格式化error输出
-func (o *Output) Errorf(format string, a ...interface{}) {
-	o.print(L_ERROR, fmt.Sprintf(format, a...))
+func (log *Log) Errorf(format string, a ...interface{}) {
+	log.TagErrorf(log.defaultTagName, format, a...)
 }
