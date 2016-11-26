@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"sync"
 )
 
 type WriteIO struct {
@@ -20,7 +19,6 @@ type WriteIO struct {
 	// 当前文件写入的大小
 	wsize int64
 	out   io.Writer
-	lock  sync.Mutex
 }
 
 const minsize = 10
@@ -87,25 +85,20 @@ func (o *WriteIO) create() error {
 // Write 实现io.Write接口
 // 主要添加了分割文件的功能
 func (o *WriteIO) Write(data []byte) (int, error) {
-	o.lock.Lock()
 	if o.out == nil {
 		if erro := o.create(); erro != nil {
-			o.lock.Unlock()
 			return 0, erro
 		}
 	}
 	size, erro := o.out.Write(data)
 	if erro != nil {
-		o.lock.Unlock()
 		return 0, erro
 	}
 	o.wsize += int64(size)
 	if o.wsize > o.maxsize {
 		if erro = o.split(); erro != nil {
-			o.lock.Unlock()
 			return size, erro
 		}
 	}
-	o.lock.Unlock()
 	return size, nil
 }
