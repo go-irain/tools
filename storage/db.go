@@ -31,9 +31,10 @@ func (d *DB) Query(query ...string) ([]Row, error) {
 	var result = make([]Row, 0)
 	rows, erro := d.db.Query(sqlstr)
 	if erro != nil {
-		if erro != sql.ErrNoRows {
-			return nil, erro
+		if erro == sql.ErrNoRows {
+			return result, nil
 		}
+		return nil, erro
 	}
 	defer rows.Close()
 	// 获取列字段信息
