@@ -34,7 +34,7 @@ func (d *DB) Query(query ...string) ([]Row, error) {
 		if erro == sql.ErrNoRows {
 			return result, nil
 		}
-		return nil, erro
+		return nil, fmt.Errorf("DB error:%s ; SQL:%s", erro.Error(), sqlstr)
 	}
 	defer rows.Close()
 	// 获取列字段信息
@@ -47,7 +47,7 @@ func (d *DB) Query(query ...string) ([]Row, error) {
 	}
 	for rows.Next() {
 		if erro := rows.Scan(scanArgs...); erro != nil {
-			return nil, erro
+			return nil, fmt.Errorf("DB error:%s ; SQL:%s", erro.Error(), sqlstr)
 		}
 		//将行数据保存到record字典
 		var record = make(Row)
@@ -72,7 +72,11 @@ func (d *DB) Exec(query ...string) (sql.Result, error) {
 		logstr := fmt.Sprintf("[storage] sql(%s)->%s", d.dbname, sqlstr)
 		d.root.output(logstr)
 	}
-	return d.db.Exec(strings.TrimSpace(sqlstr))
+	if ret, erro := d.db.Exec(strings.TrimSpace(sqlstr)); erro != nil {
+		return nil, fmt.Errorf("DB error:%s ; SQL:%s", erro.Error(), sqlstr)
+	} else {
+		return ret, nil
+	}
 }
 
 // Session 单次查询执行的会话
