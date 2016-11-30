@@ -10,6 +10,9 @@ import (
 type Msg amqp.Delivery
 
 func (c *Channel) Consumer(queueName, consumerTag string) (<-chan amqp.Delivery, error) {
+	if consumerTag == "" {
+		return nil, fmt.Errorf("Consumer consumerTag is empty")
+	}
 	queue, err := c.channel.QueueDeclare(
 		queueName, // name
 		true,      // durable

@@ -19,6 +19,7 @@ type Channel struct {
 	exchangeType string
 	key          string
 
+	conn     *amqp.Connection
 	pushdata chan string
 }
 
@@ -47,6 +48,8 @@ func NewChannel(amqpuri, exchange, exchangeType, key string, onClose func(string
 		return nil, fmt.Errorf("Channel: %s", err)
 	}
 
+	c.conn = conn
+
 	return c, nil
 }
 
@@ -54,6 +57,14 @@ func (c *Channel) Close() error {
 	return c.channel.Close()
 }
 
-func (c *Channel) Cancel(queueName string) error {
-	return c.channel.Cancel(queueName, false)
+func (c *Channel) CloseConsumer(consumerTag string) error {
+	if erro := c.channel.Cancel(consumerTag, true); erro != nil {
+		return fmt.Errorf("Consumer cancel failed: %s", erro)
+	}
+
+	if erro := c.conn.Close(); erro != nil {
+		return fmt.Errorf("AMQP connection close error: %s", erro)
+	}
+
+	return nil
 }
