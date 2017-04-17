@@ -15,13 +15,17 @@ type DB struct {
 	dbname string
 }
 
+func (d *DB) Close() error {
+	return d.db.Close()
+}
+
 // Query 查询语句
 func (d *DB) Query(query ...string) ([]Row, error) {
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query func args is empty")
 	}
 	sqlstr := query[0]
-	if len(query) > 1 {
+	if len(query) > 1 && len(query[1]) > 0 {
 		sqlstr = "/*" + query[1] + "*/ " + sqlstr
 	}
 	if d.root.output != nil {
@@ -34,7 +38,7 @@ func (d *DB) Query(query ...string) ([]Row, error) {
 		if erro == sql.ErrNoRows {
 			return result, nil
 		}
-		return nil, fmt.Errorf("DB error:%s ; SQL:%s", erro.Error(), sqlstr)
+		return nil, erro
 	}
 	defer rows.Close()
 	// 获取列字段信息
@@ -47,7 +51,7 @@ func (d *DB) Query(query ...string) ([]Row, error) {
 	}
 	for rows.Next() {
 		if erro := rows.Scan(scanArgs...); erro != nil {
-			return nil, fmt.Errorf("DB error:%s ; SQL:%s", erro.Error(), sqlstr)
+			return nil, erro
 		}
 		//将行数据保存到record字典
 		var record = make(Row)
@@ -65,7 +69,7 @@ func (d *DB) Exec(query ...string) (sql.Result, error) {
 		return nil, fmt.Errorf("Exec func args is empty")
 	}
 	sqlstr := query[0]
-	if len(query) > 1 {
+	if len(query) > 1 && len(query[1]) > 0 {
 		sqlstr = "/*" + query[1] + "*/ " + sqlstr
 	}
 	if d.root.output != nil {
@@ -73,7 +77,7 @@ func (d *DB) Exec(query ...string) (sql.Result, error) {
 		d.root.output(logstr)
 	}
 	if ret, erro := d.db.Exec(strings.TrimSpace(sqlstr)); erro != nil {
-		return nil, fmt.Errorf("DB error:%s ; SQL:%s", erro.Error(), sqlstr)
+		return nil, erro
 	} else {
 		return ret, nil
 	}
@@ -111,8 +115,8 @@ func (s *Session) Close() {
 }
 
 // SetComments 设置注释
-func (s *Session) SetComments(notes string) *Session {
-	s.comments = notes
+func (s *Session) SetComments(notes interface{}) *Session {
+	s.comments = fmt.Sprintf("%v", notes)
 	return s
 }
 
@@ -143,6 +147,18 @@ func (s *Session) Select(args ...string) ([]Row, error) {
 	return s.root.Query(sql, s.comments)
 }
 
+func (s *Session) GetOne() (Row, error) {
+	if rows, erro := s.Select("limit 1"); erro != nil {
+		return nil, erro
+	} else {
+		if len(rows) == 0 {
+			return nil, nil
+		} else {
+			return rows[0], nil
+		}
+	}
+}
+
 // Insert 返回插入的主键 当主键是自增长的整数时有效
 func (s *Session) Insert(args map[string]interface{}) (int64, error) {
 	defer s.Close()
@@ -154,6 +170,8 @@ func (s *Session) Insert(args map[string]interface{}) (int64, error) {
 		"insert into %s %s",
 		s.table, colnumsvalue,
 	)
+	// fmt.Println(sql)
+	// return 0, nil
 	if ret, erro := s.root.Exec(sql, s.comments); erro != nil {
 		return 0, erro
 	} else {
