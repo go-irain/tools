@@ -185,15 +185,17 @@ func (log *Log) Output(tag string, level Level, calldepth int, str string) {
 	}
 	buf.WriteString(str)
 	log.lock.Lock()
-	if filter, ok := log.filters[level]; ok {
-		filter(tag, str)
-	}
+	filter, fok := log.filters[level]
 	out, ok := log.tags[tag]
 	if !ok {
 		out = log.tags[log.defaultTagName]
 	}
+	_, erro := buf.WriteTo(out)
 	log.lock.Unlock()
-	if _, erro := buf.WriteTo(out); erro != nil {
+	if fok {
+		filter(tag, str)
+	}
+	if erro != nil {
 		println(erro.Error())
 	}
 	log.bufpool.Put(buf)
