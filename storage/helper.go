@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -123,12 +124,27 @@ func parseArg(result []byte, arg interface{}) []byte {
 		} else {
 			result = strconv.AppendInt(result, 0, 10)
 		}
+	case []byte:
+		result = append(result, a...)
 	case Express:
 		result = append(result, []byte(fmt.Sprintf("%v", a))...)
 	default:
-		result = append(result, '\'')
-		result = escapeStringBackslash(result, fmt.Sprintf("%v", a))
-		result = append(result, '\'')
+		t := reflect.TypeOf(arg)
+		if reflect.Slice == t.Kind() {
+			result = append(result, ')')
+			v := reflect.ValueOf(arg)
+			for i := 0; i < v.Len(); i++ {
+				result = parseArg(result, v.Index(i).Interface())
+				if i != v.Len() {
+					result = append(result, ',')
+				}
+			}
+			result = append(result, ')')
+		} else {
+			result = append(result, '\'')
+			result = escapeStringBackslash(result, fmt.Sprintf("%v", a))
+			result = append(result, '\'')
+		}
 	}
 	return result
 }
