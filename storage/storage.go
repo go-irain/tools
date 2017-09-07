@@ -40,6 +40,7 @@ func (s *Storage) AddDB(name string, dsn string) error {
 		return erro
 	}
 	db.SetMaxOpenConns(s.maxopencounts)
+	db.SetMaxIdleConns(s.maxopencounts)
 	s.db[name] = &DB{
 		db:     db,
 		dbname: name,
